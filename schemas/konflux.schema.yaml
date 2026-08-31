@@ -1,0 +1,432 @@
+# Example schema for Konflux CI/CD (https://konflux-ci.dev)
+# Covers Tekton PipelineRuns, TaskRuns, Pods, Snapshots, Releases, and Certificates,
+# with Kubernetes, KubeArchive, Splunk, and Prometheus datasources.
+#
+# Use this as a starting point. Copy it to schemas/<your-project>.schema.yaml
+# and adapt the entities, datasources, and connection env vars to your environment.
+
+identifiers:
+  pipelinerun_name:
+    label: PipelineRun Name
+  taskrun_name:
+    label: TaskRun Name
+  pod_name:
+    label: Pod Name
+  commit_sha:
+    label: Commit SHA
+    pattern: ^[a-f0-9]{7,40}$
+    normalize: lowercase
+  component_name:
+    label: Component
+  application_name:
+    label: Application
+  snapshot_name:
+    label: Snapshot Name
+  release_name:
+    label: Release Name
+  certificate_name:
+    label: Certificate Name
+  issuer_name:
+    label: Issuer Name
+  secret_name:
+    label: Secret Name
+seeds:
+  - identifier: pipelinerun_name
+  - identifier: commit_sha
+    primary: true
+  - identifier: certificate_name
+  - identifier: release_name
+  - identifier: snapshot_name
+entities:
+  PipelineRun:
+    label: Pipeline Run
+    description: tekton.dev/v1
+    format: kubernetes_resource
+    status:
+      path: "$.status.conditions[?(@.type=='Succeeded')].reason"
+    identifiers:
+      pipelinerun_name:
+        path: metadata.name
+        source: tekton-pipelines
+      commit_sha:
+        path: metadata.labels['pipelinesascode.tekton.dev/sha']
+        source: pipelines-as-code
+      component_name:
+        path: metadata.labels['appstudio.openshift.io/component']
+        source: konflux
+      application_name:
+        path: metadata.labels['appstudio.openshift.io/application']
+        source: konflux
+      snapshot_name:
+        path: metadata.labels['appstudio.openshift.io/snapshot']
+        source: konflux
+      release_name:
+        path: metadata.labels['release.appstudio.openshift.io/name']
+        source: konflux
+    references:
+      - field: metadata.name
+        points_to: TaskRun
+        as: pipelinerun_name
+        source: tekton-pipelines
+      - field: metadata.labels['appstudio.openshift.io/snapshot']
+        points_to: Snapshot
+        as: snapshot_name
+        source: konflux
+      - field: metadata.annotations['appstudio.openshift.io/snapshot']
+        points_to: Snapshot
+        as: snapshot_name
+        source: konflux
+    display:
+      status:
+        path: status.conditions[-1].reason
+        source: tekton-pipelines
+      started:
+        path: metadata.creationTimestamp
+        source: tekton-pipelines
+      completed:
+        path: status.completionTime
+        source: tekton-pipelines
+      namespace:
+        path: metadata.namespace
+        source: tekton-pipelines
+      event_type:
+        path: metadata.labels['pipelinesascode.tekton.dev/event-type']
+        source: pipelines-as-code
+      repository:
+        path: metadata.labels['pipelinesascode.tekton.dev/url-repository']
+        source: pipelines-as-code
+      pr_number:
+        path: metadata.labels['pipelinesascode.tekton.dev/pull-request']
+        source: pipelines-as-code
+      pipeline_type:
+        path: metadata.labels['pipelines.appstudio.openshift.io/type']
+        source: konflux
+      component:
+        path: metadata.labels['appstudio.openshift.io/component']
+        source: konflux
+      application:
+        path: metadata.labels['appstudio.openshift.io/application']
+        source: konflux
+    k8s:
+      endpoint: /apis/tekton.dev/v1/namespaces/{namespace}/pipelineruns
+      identifierSelectors:
+        commit_sha:
+          - pipelinesascode.tekton.dev/sha
+          - pac.test.appstudio.openshift.io/sha
+        snapshot_name: appstudio.openshift.io/snapshot
+        release_name: release.appstudio.openshift.io/name
+  TaskRun:
+    label: Task Run
+    description: tekton.dev/v1
+    format: kubernetes_resource
+    status:
+      path: "$.status.conditions[?(@.type=='Succeeded')].reason"
+    identifiers:
+      taskrun_name:
+        path: metadata.name
+        source: tekton-pipelines
+      pipelinerun_name:
+        path: metadata.labels['tekton.dev/pipelineRun']
+        source: tekton-pipelines
+      pod_name:
+        path: status.podName
+        source: tekton-pipelines
+    references:
+      - field: metadata.labels['tekton.dev/pipelineRun']
+        points_to: PipelineRun
+        as: pipelinerun_name
+        source: tekton-pipelines
+      - field: metadata.name
+        points_to: Pod
+        as: taskrun_name
+        source: tekton-pipelines
+    display:
+      task:
+        path: metadata.labels['tekton.dev/pipelineTask']
+        source: tekton-pipelines
+      status:
+        path: status.conditions[-1].reason
+        source: tekton-pipelines
+      started:
+        path: status.startTime
+        source: tekton-pipelines
+      completed:
+        path: status.completionTime
+        source: tekton-pipelines
+      namespace:
+        path: metadata.namespace
+        source: tekton-pipelines
+    k8s:
+      endpoint: /apis/tekton.dev/v1/namespaces/{namespace}/taskruns
+      identifierSelectors:
+        pipelinerun_name: tekton.dev/pipelineRun
+        taskrun_name: tekton.dev/taskRun
+  Pod:
+    label: Pod
+    description: v1
+    format: kubernetes_resource
+    status:
+      path: "$.status.phase"
+    identifiers:
+      pod_name:
+        path: metadata.name
+        source: tekton-pipelines
+      taskrun_name:
+        path: metadata.labels['tekton.dev/taskRun']
+        source: tekton-pipelines
+    references:
+      - field: metadata.labels['tekton.dev/taskRun']
+        points_to: TaskRun
+        as: taskrun_name
+        source: tekton-pipelines
+    display:
+      status:
+        path: status.phase
+        source: tekton-pipelines
+      started:
+        path: status.startTime
+        source: tekton-pipelines
+      namespace:
+        path: metadata.namespace
+        source: tekton-pipelines
+    k8s:
+      endpoint: /api/v1/namespaces/{namespace}/pods
+      identifierSelectors:
+        taskrun_name: tekton.dev/taskRun
+  Snapshot:
+    label: Snapshot
+    description: appstudio.redhat.com/v1alpha1
+    format: kubernetes_resource
+    identifiers:
+      snapshot_name:
+        path: metadata.name
+        source: konflux
+      application_name:
+        path: spec.application
+        source: konflux
+      component_name:
+        path: metadata.labels['appstudio.openshift.io/component']
+        source: konflux
+      pipelinerun_name:
+        path: metadata.labels['appstudio.openshift.io/build-pipelinerun']
+        source: konflux
+      commit_sha:
+        path: metadata.labels['pac.test.appstudio.openshift.io/sha']
+        source: konflux
+    references:
+      - field: metadata.labels['appstudio.openshift.io/build-pipelinerun']
+        points_to: PipelineRun
+        as: pipelinerun_name
+        source: konflux
+      - field: metadata.name
+        points_to: PipelineRun
+        as: snapshot_name
+        source: konflux
+      - field: metadata.name
+        points_to: Release
+        as: snapshot_name
+        source: konflux
+    display:
+      application:
+        path: spec.application
+        source: konflux
+      component:
+        path: metadata.labels['appstudio.openshift.io/component']
+        source: konflux
+      namespace:
+        path: metadata.namespace
+        source: konflux
+    k8s:
+      endpoint: /apis/appstudio.redhat.com/v1alpha1/namespaces/{namespace}/snapshots
+      identifierSelectors:
+        commit_sha: pac.test.appstudio.openshift.io/sha
+        pipelinerun_name: appstudio.openshift.io/build-pipelinerun
+  Release:
+    label: Release
+    description: appstudio.redhat.com/v1alpha1
+    format: kubernetes_resource
+    status:
+      path: "$.status.conditions[?(@.type=='Released')].reason"
+    identifiers:
+      release_name:
+        path: metadata.name
+        source: konflux
+      snapshot_name:
+        path: spec.snapshot
+        source: konflux
+      commit_sha:
+        path: metadata.labels['pac.test.appstudio.openshift.io/sha']
+        source: konflux
+    references:
+      - field: spec.snapshot
+        points_to: Snapshot
+        as: snapshot_name
+        source: konflux
+      - field: metadata.name
+        points_to: PipelineRun
+        as: release_name
+        source: konflux
+    display:
+      status:
+        path: status.conditions[-1].reason
+        source: konflux
+      phase:
+        path: status.phase
+        source: konflux
+      started:
+        path: metadata.creationTimestamp
+        source: konflux
+      completed:
+        path: status.completionTime
+        source: konflux
+      namespace:
+        path: metadata.namespace
+        source: konflux
+      release_plan:
+        path: spec.releasePlan
+        source: konflux
+    k8s:
+      endpoint: /apis/appstudio.redhat.com/v1alpha1/namespaces/{namespace}/releases
+      identifierSelectors:
+        snapshot_name: release.appstudio.openshift.io/snapshot
+        commit_sha: pac.test.appstudio.openshift.io/sha
+  Certificate:
+    label: Certificate
+    format: kubernetes_resource
+    identifiers:
+      certificate_name:
+        path: metadata.name
+        source: cert-manager
+      issuer_name:
+        path: spec.issuerRef.name
+        source: cert-manager
+      secret_name:
+        path: spec.secretName
+        source: cert-manager
+    references: []
+    display:
+      ready:
+        path: status.conditions[-1].status
+        source: cert-manager
+      status:
+        path: status.conditions[-1].reason
+        source: cert-manager
+      not_after:
+        path: status.notAfter
+        source: cert-manager
+      namespace:
+        path: metadata.namespace
+        source: cert-manager
+    k8s:
+      endpoint: /apis/cert-manager.io/v1/namespaces/{namespace}/certificates
+      identifierSelectors:
+        certificate_name: cert-manager.io/certificate-name
+datasources:
+  my-kubernetes:
+    provider: kubernetes
+    types:
+      - json
+    connection:
+      url: ${KUBERNETES_API_URL}
+      auth:
+        type: bearer
+        token: ${KUBERNETES_TOKEN}
+    serves:
+      - PipelineRun
+      - TaskRun
+      - Pod
+      - Snapshot
+      - Release
+      - Certificate
+  my-splunk:
+    provider: splunk
+    types:
+      - logs
+    connection:
+      url: ${SPLUNK_URL}
+      auth:
+        type: basic
+        username: ${SPLUNK_USERNAME}
+        password: ${SPLUNK_PASSWORD}
+    enriches:
+      PipelineRun:
+        queries:
+          logs_by_pipelinerun_name:
+            as: logs
+            format: logs
+            query:
+              type: splunk
+              search: search index=ci_logs tekton_dev_pipelineRun="${pipelinerun_name}" | sort 0 _time
+          error_logs_by_pipelinerun_name:
+            as: error_logs
+            format: logs
+            query:
+              type: splunk
+              search: search index=ci_logs tekton_dev_pipelineRun="${pipelinerun_name}" (level=ERROR OR level=FATAL OR
+                log_level=error) | sort 0 _time
+      TaskRun:
+        queries:
+          logs_by_taskrun_name:
+            as: logs
+            format: logs
+            query:
+              type: splunk
+              search: search index=ci_logs tekton_dev_taskRun="${taskrun_name}" | sort 0 _time
+  my-prometheus:
+    provider: prometheus
+    types:
+      - metrics
+    connection:
+      url: ${PROMETHEUS_URL}
+    enriches:
+      PipelineRun:
+        queries:
+          pipeline_duration:
+            as: pipeline_duration
+            format: metrics
+            query:
+              type: promql
+              promql: tekton_pipelines_controller_pipelinerun_duration_seconds_sum{exported_namespace="${display.namespace}",
+                pipeline=~".*"}
+          pipeline_run_count:
+            as: pipeline_run_count
+            format: metrics
+            query:
+              type: promql
+              promql: tekton_pipelines_controller_pipelinerun_duration_seconds_count{exported_namespace="${display.namespace}"}
+          taskrun_durations:
+            as: taskrun_durations
+            format: metrics
+            query:
+              type: promql
+              promql: tekton_pipelines_controller_pipelinerun_taskrun_duration_seconds_sum{exported_namespace="${display.namespace}",
+                pipeline=~".*"}
+      TaskRun:
+        queries:
+          task_duration_history:
+            as: task_duration_history
+            format: metrics
+            query:
+              type: promql
+              promql: tekton_pipelines_controller_pipelinerun_taskrun_duration_seconds_sum{exported_namespace="${display.namespace}"}
+  my-kubearchive:
+    provider: kubearchive
+    types:
+      - json
+    connection:
+      url: ${KUBEARCHIVE_URL}
+      auth:
+        type: bearer
+        token: ${KUBEARCHIVE_TOKEN}
+    serves:
+      - PipelineRun
+      - TaskRun
+      - Pod
+      - Snapshot
+      - Release
+traversal:
+  max_depth: 4
+  max_queue_per_level: 200
+  max_total_entities: 200
+  timeout_seconds: 30
+  concurrency: 5
